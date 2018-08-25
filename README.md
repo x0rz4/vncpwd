@@ -27,7 +27,7 @@ Value: passwd or passwd2
 
 Luigi Auriemma的VNC密码解码器（vncpwd）工具可以解密经典的VNC DES加密方法。只需在命令行工具后嵌入加密密码，即可显示真实密码。要使用vncpwd，请单击“开始”按钮，在搜索栏中键入cmd，然后按Enter键。切换到vncpwd.exe所在的目录并运行以下commnad行：
 
-阅读更多：Https：//Www.Raymond.Cc/Blog/Crack-Or-Decrypt-Vnc-Server-Encrypted-Password/
+阅读更多：https//Www.Raymond.Cc/Blog/Crack-Or-Decrypt-Vnc-Server-Encrypted-Password/
 
 
 
