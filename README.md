@@ -1,5 +1,13 @@
+与任何其他远程控制软件一样，VNC服务器可以受密码保护，以防止未经授权的用户控制服务器。保存在服务器上的密码使用DES加密，但不幸的是，该算法早已被破解。有许多第三方工具声称自动解密并显示VNC服务器密码，但大多数工具未更新以使用最新版本的VNC。根据我们测试的结果，Nirsoft的VNCPassView只能显示UltraVNC密码，Patrik Karlsson的VNCPwdump无法使用-s或-c开关显示RealVNC密码，而VNC Password Decryptor也无法在本地获取和解密VNC密码电脑。
+这些自动VNC密码恢复工具不起作用，因为保存在计算机上的DES加密密码的位置已更改，并且未更新它们以从新路径读取。在这里，我们将指导您如何找到VNC加密密码，以及如何通过基于Web或通过命令行工具在本地手动解密它们。
+找到加密的VNC密码
 大多数VNC加密密码都保存在注册表中，而只有UltraVNC保存在INI文件中。以下是如何根据下面提供的注册表位置获取RealVNC的加密密码的示例。
+
 1.单击“开始”按钮，在“搜索程序和文件”栏中键入regedit，然后按Enter键。
+
+2.通过双击它展开HKEY_LOCAL_MACHINE文件夹并继续为SOFTWARE，RealVNC执行该操作，直到到达vncserver。
+
+3.在右窗格中，您应该看到名为Password的注册表名称，类型为REG_SZ，数据是随机字符。您在Password中看到的随机字符是RealVNC的加密密码，请注意它以进行解密。
 
 2.通过双击它展开HKEY_LOCAL_MACHINE文件夹并继续为SOFTWARE，RealVNC执行该操作，直到到达vncserver。
 
