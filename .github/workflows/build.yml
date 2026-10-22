@@ -80,7 +80,6 @@ jobs:
             -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake \
             -DCMAKE_BUILD_TYPE=Release \
-            -DVNCPWD_WINE_EMULATOR=wine \
             -DVNCPWD_WARNINGS_AS_ERRORS=ON
 
       - name: Build
@@ -109,22 +108,75 @@ jobs:
           wineboot --init
           wineserver --wait
 
-      - name: Run tests under Wine
-        env:
-          WINEDEBUG: -all
-          WINEPREFIX: ${{ github.workspace }}/.wine
-        run: ctest --test-dir build-win64 --output-on-failure
-
-      # A direct CLI run, independent of CTest, so a misconfigured emulator
-      # cannot hide a broken binary.
-      - name: Smoke test the executable
+      # CTest is not used here.  With a cross build CTest launches the PE file
+      # directly, the kernel falls back to /bin/sh, and the result is a shell
+      # syntax error that CTest reports as a normal failure -- or, for a
+      # WILL_FAIL test, as a pass.  Invoking Wine explicitly keeps the exit
+      # status meaningful.  `wine` on a console app returns the program's own
+      # exit code, so the assertions below are exact.
+      - name: Unit tests under Wine
         env:
           WINEDEBUG: -all
           WINEPREFIX: ${{ github.workspace }}/.wine
         run: |
-          wine build-win64/vncpwd.exe --version
-          wine build-win64/vncpwd.exe inspect --hex dbd83cfd727a1458 --show -q \
-            | grep -q 'password'
+          # GitHub runs this step under `bash -e`, so a non-zero exit from
+          # Wine would abort before the log is inspected.  Capture the status
+          # first, then decide.
+          set +e
+          wine build-win64/vncpwd_tests.exe > unit.log 2>&1
+          status=$?
+          set -e
+          cat unit.log
+          if [ "$status" -ne 0 ]; then
+            echo "::error::unit tests exited with $status"
+            exit 1
+          fi
+          grep -q '0 failure(s)' unit.log \
+            || { echo '::error::unit test summary missing or non-zero'; exit 1; }
+
+      - name: CLI end-to-end under Wine
+        env:
+          WINEDEBUG: -all
+          WINEPREFIX: ${{ github.workspace }}/.wine
+        run: |
+          exe=build-win64/vncpwd.exe
+          set +e
+
+          wine "$exe" --version
+          [ $? -eq 0 ] || { echo '::error::--version failed'; exit 1; }
+
+          out=$(wine "$exe" inspect --hex dbd83cfd727a1458 --show -q)
+          rc=$?
+          echo "$out"
+          [ $rc -eq 0 ] || { echo "::error::inspect exited $rc"; exit 1; }
+          echo "$out" | grep -q 'password' \
+            || { echo '::error::decoded password not printed'; exit 1; }
+
+          # Malformed hex must be rejected with exit status 2.  Asserting the
+          # exact status avoids the WILL_FAIL trap where "could not run" is
+          # indistinguishable from "correctly failed".
+          wine "$exe" inspect --hex dbd83cfd727a145 -q >/dev/null 2>&1
+          rc=$?
+          echo "odd-hex exit status: $rc"
+          [ $rc -eq 2 ] \
+            || { echo "::error::expected exit 2 for malformed hex, got $rc"; exit 1; }
+
+          # A machine-readable audit must produce a report and must not leak
+          # secrets by default.  Exit status 0 means "no high-risk findings"
+          # and 1 means "high-risk findings present" -- both are successful
+          # runs.  Only 2 (usage or I/O error) indicates the tool failed.
+          json=$(wine "$exe" audit --json -q)
+          rc=$?
+          set -e
+          echo "$json"
+          case $rc in
+            0|1) ;;
+            *) echo "::error::audit exited $rc (expected 0 or 1)"; exit 1 ;;
+          esac
+          echo "$json" | grep -q '"max_risk"' \
+            || { echo '::error::audit --json produced no report'; exit 1; }
+          echo "$json" | grep -q '"secrets_included": false' \
+            || { echo '::error::secrets are not redacted by default'; exit 1; }
 
       - name: Stage artefact
         run: |

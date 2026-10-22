@@ -24,14 +24,11 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
-# A cross-compiled .exe cannot be executed on the build host.  When Wine is
-# available, register it as the emulator so CTest runs every test binary
-# through it instead of trying to exec() the PE directly.  Pass
-#   -DVNCPWD_WINE_EMULATOR=wine
-# on the CMake command line; leave it unset to build without running tests.
-#
-# Read the cache entry only if it was supplied: declaring it here would shadow
-# a value the caller passed with -D and silently disable the emulator.
-if(DEFINED NVCPWD_WINE_EMULATOR AND NVCPWD_WINE_EMULATOR)
-    set(CMAKE_CROSSCOMPILING_EMULATOR "${NVCPWD_WINE_EMULATOR}")
-endif()
+# Tests are not registered for cross builds: a PE binary cannot be exec'd on
+# the build host.  An earlier revision tried CMAKE_CROSSCOMPILING_EMULATOR and
+# CTest still ran the .exe through /bin/sh -- the tests "executed", produced
+# MZ-header parse errors on stderr, and a WILL_FAIL test recorded that as a
+# pass.  That failure mode is worse than not testing at all, so the Windows CI
+# job now invokes the binaries under Wine itself, where exit status is
+# unambiguous.
+

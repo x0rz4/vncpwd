@@ -73,8 +73,8 @@ endif()
 install(TARGETS vncpwd RUNTIME DESTINATION bin)
 
 if(VNCPWD_BUILD_TESTS)
-    enable_testing()
-
+    # The test executable is always built, including for a cross build: the
+    # Windows CI job runs it under Wine.
     add_executable(vncpwd_tests
         tests/run_tests.c
         tests/test_main.c
@@ -91,29 +91,32 @@ if(VNCPWD_BUILD_TESTS)
     set_target_properties(vncpwd_tests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-    # Tests write fixture files such as test_ini_tmp.ini; run them somewhere
-    # writable rather than next to the source tree.
-    add_test(NAME unit COMMAND vncpwd_tests
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    # CTest registrations are skipped when cross-compiling: the build host
+    # cannot execute a PE binary, and CTest gives no reliable way to tell
+    # "failed to launch" apart from "ran and returned non-zero".  A WILL_FAIL
+    # test in particular recorded a shell parse error as a pass.  Cross builds
+    # are driven directly by the CI job instead.
+    if(NOT CMAKE_CROSSCOMPILING)
+        enable_testing()
 
-    # Under a cross build the console tools are PE binaries.  When CMake is
-    # told about an emulator (see cmake/mingw-w64-x86_64.cmake), it prefixes
-    # these commands automatically, so the same test definitions verify a
-    # Windows executable from a Linux host.
+        # Tests write fixture files such as test_ini_tmp.ini; run them
+        # somewhere writable rather than next to the source tree.
+        add_test(NAME unit COMMAND vncpwd_tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-    # End-to-end checks drive the real binary.  They rely only on the command
-    # line interface, so they also work when the core is exercised by a fuzzer.
-    add_test(NAME cli_hex_password
-        COMMAND vncpwd inspect --hex dbd83cfd727a1458 --show -q)
-    set_tests_properties(cli_hex_password PROPERTIES
-        PASS_REGULAR_EXPRESSION "password")
+        # End-to-end checks drive the real binary through its CLI.
+        add_test(NAME cli_hex_password
+            COMMAND vncpwd inspect --hex dbd83cfd727a1458 --show -q)
+        set_tests_properties(cli_hex_password PROPERTIES
+            PASS_REGULAR_EXPRESSION "password")
 
-    add_test(NAME cli_rejects_odd_hex
-        COMMAND vncpwd inspect --hex dbd83cfd727a145 -q)
-    set_tests_properties(cli_rejects_odd_hex PROPERTIES WILL_FAIL TRUE)
+        add_test(NAME cli_rejects_odd_hex
+            COMMAND vncpwd inspect --hex dbd83cfd727a145 -q)
+        set_tests_properties(cli_rejects_odd_hex PROPERTIES WILL_FAIL TRUE)
 
-    add_test(NAME cli_audit_exit_code
-        COMMAND vncpwd audit -q)
-    set_tests_properties(cli_audit_exit_code PROPERTIES
-        PASS_REGULAR_EXPRESSION "max risk:")
+        add_test(NAME cli_audit_exit_code
+            COMMAND vncpwd audit -q)
+        set_tests_properties(cli_audit_exit_code PROPERTIES
+            PASS_REGULAR_EXPRESSION "max risk:")
+    endif()
 endif()
