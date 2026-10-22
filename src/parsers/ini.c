@@ -19,7 +19,8 @@ static int utf16le_to_utf8(const char *in, size_t len, char **out, size_t *outle
     buf = (char *)malloc(len + 1);
     if (!buf) return -1;
     for (i = 2; i + 1 < len; i += 2) {
-        unsigned int cp = (unsigned char)in[i] | ((unsigned char)in[i + 1] << 8);
+        unsigned int cp = (unsigned int)(unsigned char)in[i] |
+                          ((unsigned int)(unsigned char)in[i + 1] << 8);
         if (cp < 0x80) {
             buf[o++] = (char)cp;
         } else {

@@ -21,6 +21,12 @@ jobs:
   # Native Linux build with sanitizers.  This is the fast gate: it finds
   # out-of-bounds reads and undefined behaviour that a Wine run would not
   # necessarily surface, and it does not depend on the cross toolchain.
+  #
+  # Ubuntu is also the only job that compiles and runs the code as LP64.
+  # Developing on Windows means `unsigned long` is 32 bits there, so an
+  # LP64-only defect (a 64-bit size_t narrowing, or a UL literal that
+  # promotes) passes local builds and fails here.  That is exactly how the
+  # des.c literal bug reached CI once.
   test:
     name: test (ubuntu, asan+ubsan)
     runs-on: ubuntu-latest

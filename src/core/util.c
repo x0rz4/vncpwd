@@ -1,3 +1,11 @@
+/* fileno(), isatty() and the S_IFMT family are POSIX, not ISO C.  With
+ * CMAKE_C_EXTENSIONS OFF the compiler is invoked as -std=c17, which defines
+ * __STRICT_ANSI__ and makes glibc hide them.  Request POSIX.1-2008 before
+ * any header is included. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "util.h"
 
 #include <ctype.h>
@@ -9,10 +17,12 @@
 #  include <io.h>
 #  include <windows.h>
 #  define VNC_ISATTY(f) _isatty(_fileno(f))
+#  define VNC_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
 #else
 #  include <dirent.h>
 #  include <unistd.h>
 #  define VNC_ISATTY(f) isatty(fileno(f))
+#  define VNC_ISREG(m) S_ISREG(m)
 #endif
 
 static int lower(int c) {
@@ -167,7 +177,7 @@ int vnc_expand_path(const char *in, char *out, size_t outcap) {
 int vnc_file_exists(const char *path) {
     struct stat st;
     if (!path) return 0;
-    return stat(path, &st) == 0 && (st.st_mode & S_IFREG) != 0;
+    return stat(path, &st) == 0 && VNC_ISREG(st.st_mode);
 }
 
 int vnc_is_tty(FILE *f) {

@@ -48,8 +48,11 @@ if(MSVC)
         target_compile_options(vncpwd_core PRIVATE /WX)
     endif()
 else()
+    # -Wshorten-64-to-32 is Clang's; GCC spells the same class of bug through
+    # -Wconversion.  Both catch a size_t silently narrowing on LP64, which is
+    # the class of defect that produced wrong DES output in 0.2.
     target_compile_options(vncpwd_core PRIVATE
-        -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
+        -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
     if(VNCPWD_WARNINGS_AS_ERRORS)
         target_compile_options(vncpwd_core PRIVATE -Werror)
     endif()
