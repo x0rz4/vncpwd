@@ -1,77 +1,166 @@
-与任何其他远程控制软件一样，VNC服务器可以受密码保护，以防止未经授权的用户控制服务器。保存在服务器上的密码使用DES加密，但不幸的是，该算法早已被破解。有许多第三方工具声称自动解密并显示VNC服务器密码，但大多数工具未更新以使用最新版本的VNC。根据我们测试的结果，Nirsoft的VNCPassView只能显示UltraVNC密码，Patrik Karlsson的VNCPwdump无法使用-s或-c开关显示RealVNC密码，而VNC Password Decryptor也无法在本地获取和解密VNC密码电脑。
-这些自动VNC密码恢复工具不起作用，因为保存在计算机上的DES加密密码的位置已更改，并且未更新它们以从新路径读取。在这里，我们将指导您如何找到VNC加密密码，以及如何通过基于Web或通过命令行工具在本地手动解密它们。
-找到加密的VNC密码
-大多数VNC加密密码都保存在注册表中，而只有UltraVNC保存在INI文件中。以下是如何根据下面提供的注册表位置获取RealVNC的加密密码的示例。
+# vncpwd 2.0 — VNC Credential & Security Inspector
 
-1.单击“开始”按钮，在“搜索程序和文件”栏中键入regedit，然后按Enter键。
+**English** | [中文](README_zh.md)
 
-2.通过双击它展开HKEY_LOCAL_MACHINE文件夹并继续为SOFTWARE，RealVNC执行该操作，直到到达vncserver。
+Identifies the credentials VNC products store locally, determines which
+authentication scheme is actually configured, and rates the exposure.
 
-3.在右窗格中，您应该看到名为Password的注册表名称，类型为REG_SZ，数据是随机字符。您在Password中看到的随机字符是RealVNC的加密密码，请注意它以进行解密。
+The tool only reads configuration already present on the local machine. It
+does not connect to a network, does not attempt logins, and does not implement
+the RA2 or VeNCrypt handshakes.
 
-2.通过双击它展开HKEY_LOCAL_MACHINE文件夹并继续为SOFTWARE，RealVNC执行该操作，直到到达vncserver。
+The original `vncpwd 0.2` was Luigi Auriemma's VNC Password Decoder
+(GPL-2.0-or-later) and handled only the classic fixed-key DES format.
 
-3.在右窗格中，您应该看到名为Password的注册表名称，类型为REG_SZ，数据是随机字符。您在Password中看到的随机字符是RealVNC的加密密码，请注意它以进行解密。
+---
 
-RealVNC
-HKEY_LOCAL_MACHINE\SOFTWARE\RealVNC\vncserver
-Value: Password
+## Why this is not just "a few more ciphers"
 
-TightVNC
-HKEY_CURRENT_USER\Software\TightVNC\Server
-Value: Password or PasswordViewOnly
+VNC password material falls into three distinct classes. Conflating them leads
+to wrong conclusions:
 
-TigerVNC
-HKEY_LOCAL_USER\Software\TigerVNC\WinVNC4
-Value: Password
+| Class | Location | Recoverable locally |
+|---|---|---|
+| Server-side password | registry, `ultravnc.ini`, `~/.vnc/passwd` | Yes, for the classic VNC format (fixed-key DES) |
+| Viewer-saved connection credential | `*.vnc`, `*.remmina` | Sometimes, depending on the client |
+| Remote authentication protocol | RA2, RA2_256, VeNCrypt, MS-Logon, SSO | **No** — no recoverable material exists locally |
 
-UltraVNC
-C:\Program Files\UltraVNC\ultravnc.ini
-Value: passwd or passwd2
+So 2.0 aims to recover what can be recovered, explain **why** the rest cannot
+be, and point out configuration risks along the way.
 
-一旦获得加密的VNC密码，下一步就是解密它。在这里，我提供了要在脱机计算机上运行但需要从命令提示符运行的命令行工具。
+## Supported formats and locations
 
-解密加密的VNC密码
+| Product | Location | Format | Auth audit |
+|---|---|---|---|
+| RealVNC 4–8 | `HKLM\SOFTWARE\RealVNC\vncserver{4,}`, `HKCU\Software\RealVNC` | REG_SZ hex, REG_BINARY | `Authentication`, `Encryption`, `SecurityTypes` |
+| TightVNC 2.x | `HKCU`/`HKLM\Software\TightVNC\Server` | `Password`, `PasswordViewOnly` | — |
+| TigerVNC (Windows) | `HKCU`/`HKLM\...\TigerVNC\WinVNC4` | REG_SZ hex | `SecurityTypes` (RA2 / RA2_256 / VeNCrypt) |
+| TigerVNC (Unix) | `~/.vnc/passwd` | 8 or 16 raw bytes | file permissions |
+| UltraVNC | `ultravnc.ini`: `passwd`, `passwd2`, `[admin] passwd` | hex | `MSLogonRequired`, `DSMPlugin`, `AuthRequired`, `UseRegistry` |
+| UltraVNC | `HKLM`/`HKCU\SOFTWARE\ORL\WinVNC3` | hex, binary | the `UseRegistry=1` path |
+| x11vnc / libvncserver | `~/.vnc/passwd` | 8 or 16 raw bytes | file permissions |
+| TurboVNC | `~/.vnc/passwd` | 8 or 16 raw bytes | file permissions |
+| Viewer connection files | `*.vnc`, `~/.remmina/*.remmina` | hex, base64(hex) | — |
 
-Luigi Auriemma的VNC密码解码器（vncpwd）工具可以解密经典的VNC DES加密方法。只需在命令行工具后嵌入加密密码，即可显示真实密码。要使用vncpwd，请单击“开始”按钮，在搜索栏中键入cmd，然后按Enter键。切换到vncpwd.exe所在的目录并运行以下commnad行：
+`--deep` additionally walks each product's registry subtree and resolves any
+value whose name contains `pass`, which catches vendor-customised keys.
 
-阅读更多：https//Www.Raymond.Cc/Blog/Crack-Or-Decrypt-Vnc-Server-Encrypted-Password/
+## Building
 
+Requires CMake ≥ 3.16 and a C17 compiler.
 
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
 
+On Windows this produces `build\Release\vncpwd.exe` (MSVC or MinGW).
 
----------------------------------------------------------------------------------------------
+## Usage
 
+```sh
+# scan this machine
+vncpwd scan
+vncpwd scan --json
+vncpwd scan --product tightvnc --show
+vncpwd scan --deep
 
+# audit: findings only, suitable for scripting
+vncpwd audit
+vncpwd audit --json
 
-Most of the VNCs encrypted password are saved in registry while only UltraVNC is saved in an INI file. Here is an example on how to get the encrypted password for RealVNC based on the registry location provided below.
-1. Click the Start button, type regedit in the Search programs and files bar followed by pressing Enter.
+# check a single ciphertext or file
+vncpwd inspect --hex dbd83cfd727a1458
+vncpwd inspect --raw '12345678'
+vncpwd inspect --file saved.vnc
+vncpwd inspect path/to/ultravnc.ini
 
-2. Expand the HKEY_LOCAL_MACHINE folder by double clicking on it and continue doing that for SOFTWARE, RealVNC and until you reach vncserver.
+# list registered product identifiers
+vncpwd list
+```
 
-3. At the right pane, you should see a registry name called Password with the type as REG_SZ and random characters for the data. The random characters you see for Password is the encrypted password for RealVNC and please take note of it for decryption.
+| Option | Meaning |
+|---|---|
+| `--show` | print plaintext; by default secrets are redacted as `p*** (len 8)` |
+| `--json`, `--csv` | machine-readable output |
+| `--product <id>` | limit to one provider |
+| `--deep` | recurse into registry subtrees |
+| `-q` | drop the banner (never the result) |
 
-RealVNC
-HKEY_LOCAL_MACHINE\SOFTWARE\RealVNC\vncserver
-Value: Password
+Exit status: `0` no high-risk findings, `1` high or critical findings present,
+`2` usage or I/O error. Usable directly in CI or inventory scripts.
 
-TightVNC
-HKEY_CURRENT_USER\Software\TightVNC\Server
-Value: Password or PasswordViewOnly
+## Sample output
 
-TigerVNC
-HKEY_LOCAL_USER\Software\TigerVNC\WinVNC4
-Value: Password
+```
+[TightVNC] Software\TightVNC\Server \ Password
+  auth: vnc-password  encoding: binary  cipher: 8 bytes
+  password: p******* (len 8)  (confidence 95%)
+  note: primary password
 
-UltraVNC
-C:\Program Files\UltraVNC\ultravnc.ini
-Value: passwd or passwd2
+Findings
+--------
+  [high    ] RECOVERABLE-VNC-PASSWORD password stored with the public fixed DES key
+             at Software\TightVNC\Server\Password
+  [medium  ] WEAK-PASSWORD          password is short or uses a single character class
+  [info    ] MAX-LENGTH-PASSWORD    protocol caps the password at 8 characters
+```
 
-Once you’ve got the encrypted VNC password, the next step is to decrypt it. Here we offer two choices which is the web based that is very easy to use but requires an internet connection to access it or a command line tool that works on an offline computer but requires to run from command prompt.
+## Confidence scoring
 
-Decrypting The Encrypted VNC Password
+DES has no MAC and no padding check, so any 8 bytes decrypt to 8 bytes.
+A successful decryption therefore says nothing about whether the password was
+correct. The tool scores as follows:
 
-The VNC Password Decoder (vncpwd) tool by Luigi Auriemma can decrypt classic VNC DES encryption method. Simply embed the encrypted password after the command line tool and the real password will be displayed. To use vncpwd, click Start button, type cmd at search bar and press Enter. Change to the directory where vncpwd.exe is located and run the following commnad line:
+- plaintext contains **non-printable bytes** → rejected (`confidence 0.05`);
+  this is usually the signature of a wrong guess
+- an **all-zero block** → treated as "no password set", not as an empty password
+- fully printable ASCII → starts at `0.80`, `+0.10` for exactly 8 bytes,
+  `+0.05` for 4 bytes or more
+- anything below `0.60` is reported as "not recoverable" rather than guessed at
 
-Read More: Https://Www.Raymond.Cc/Blog/Crack-Or-Decrypt-Vnc-Server-Encrypted-Password/
+## Security notes
 
+- Plaintext is **not printed by default**; `--show` is required. Do not put
+  `--show` output into shared logs or tickets.
+- Access is read-only: no registry key or configuration file is modified.
+- The tool contains no remote probing or credential-spraying capability.
+
+**Use only on systems you own or are authorized to assess.**
+
+## Layout
+
+```
+include/          public headers
+src/core/         DES, encodings, format validation, detection, utilities
+src/parsers/      registry, INI, connection-file parsers
+src/providers/    per-product location tables and auth audits
+src/reports/      text, JSON and CSV output
+src/inspector.c   scan / inspect dispatch
+tests/            unit tests and CLI end-to-end tests
+.github/workflows/build.yml
+```
+
+## CI
+
+`.github/workflows/build.yml` runs on GitHub:
+
+- **test** — Ubuntu / macOS / Windows, Debug with `-Werror`
+- **sanitizers** — Clang with ASan + UBSan and `-Werror`
+- **gcc** — GCC 13 Release with `-Werror`
+- **windows** — MSVC x64 and x86, runs the suite, uploads artifacts
+- **linux** — statically linked x86_64 and aarch64 binaries
+- **release** — on a `v*` tag, collects artifacts and generates checksums
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+`src/core/des.c` is derived from Richard Outerbridge's public-domain D3DES,
+with the VNC changes copyright AT&T Laboratories Cambridge. Those notices,
+and the scope of the MIT grant, are recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+VNC, RealVNC, TightVNC, TigerVNC, UltraVNC and TurboVNC are trademarks of
+their respective owners. This project is not affiliated with any of them.

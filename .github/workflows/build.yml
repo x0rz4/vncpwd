@@ -1,0 +1,162 @@
+name: build
+
+on:
+  push:
+    branches: [ master, main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CTEST_OUTPUT_ON_FAILURE: 1
+
+jobs:
+  # Native Linux build with sanitizers.  This is the fast gate: it finds
+  # out-of-bounds reads and undefined behaviour that a Wine run would not
+  # necessarily surface, and it does not depend on the cross toolchain.
+  test:
+    name: test (ubuntu, asan+ubsan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
+            -DVNCPWD_SANITIZERS=ON \
+            -DVNCPWD_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
+
+  # The shipping artefact: a 64-bit Windows executable cross-compiled on
+  # Linux with mingw-w64.  The same CTest definitions are re-run here with
+  # Wine as the emulator, so the produced .exe is actually executed rather
+  # than merely linked.
+  windows:
+    name: windows x64 (cross, wine)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            mingw-w64 cmake ninja-build wine
+          # Some images expose only the suffixed binary; make `wine` resolve
+          # so the emulator name in the toolchain file does not depend on
+          # which packaging the runner happens to carry.
+          if ! command -v wine >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v wine64)" /usr/local/bin/wine
+          fi
+          wine --version
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-win64 \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVNCPWD_WINE_EMULATOR=wine \
+            -DVNCPWD_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build-win64 --parallel
+
+      - name: Verify the artefact is a 64-bit PE
+        run: |
+          file build-win64/vncpwd.exe
+          file build-win64/vncpwd.exe | grep -q 'PE32+ executable'
+          # No MinGW runtime DLLs may be required: the tool has to run on a
+          # bare Windows host.  Only the UCRT API sets, KERNEL32 and ADVAPI32
+          # should appear in the import table.
+          imports=$(x86_64-w64-mingw32-objdump -p build-win64/vncpwd.exe \
+                    | awk '/DLL Name:/ {print $3}')
+          echo "Imports:"; echo "$imports"
+          if echo "$imports" | grep -qiE 'libgcc|libwinpthread|libstdc'; then
+            echo "::error::vncpwd.exe depends on a MinGW runtime DLL"
+            exit 1
+          fi
+
+      - name: Initialise Wine prefix
+        env:
+          WINEDEBUG: -all
+          WINEPREFIX: ${{ github.workspace }}/.wine
+        run: |
+          wineboot --init
+          wineserver --wait
+
+      - name: Run tests under Wine
+        env:
+          WINEDEBUG: -all
+          WINEPREFIX: ${{ github.workspace }}/.wine
+        run: ctest --test-dir build-win64 --output-on-failure
+
+      # A direct CLI run, independent of CTest, so a misconfigured emulator
+      # cannot hide a broken binary.
+      - name: Smoke test the executable
+        env:
+          WINEDEBUG: -all
+          WINEPREFIX: ${{ github.workspace }}/.wine
+        run: |
+          wine build-win64/vncpwd.exe --version
+          wine build-win64/vncpwd.exe inspect --hex dbd83cfd727a1458 --show -q \
+            | grep -q 'password'
+
+      - name: Stage artefact
+        run: |
+          mkdir -p dist
+          cp build-win64/vncpwd.exe dist/
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+          (cd dist && sha256sum vncpwd.exe > SHA256SUMS.txt)
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vncpwd-windows-x64
+          path: dist/
+          if-no-files-found: error
+
+  # Tagged releases attach the Windows executable and its checksum.
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ test, windows ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vncpwd-windows-x64
+          path: dist
+
+      - name: Rename for the release
+        run: |
+          mkdir -p release
+          cp dist/vncpwd.exe "release/vncpwd-${GITHUB_REF_NAME}-windows-x64.exe"
+          (cd release && sha256sum *.exe > SHA256SUMS.txt)
+          ls -l release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

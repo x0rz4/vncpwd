@@ -1,0 +1,27 @@
+# Build output
+build/
+out/
+dist/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Test artefacts
+test_ini_tmp.ini
+test_conn_tmp.vnc
+test_conn_tmp.remmina
+Testing/
+
+# Editor and OS noise
+.vs/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Old pre-2.0 build output
+*.exe
+*.o
+*.obj
